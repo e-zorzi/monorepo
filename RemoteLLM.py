@@ -20,13 +20,15 @@ class IRemoteLLM(ABC):
 @define(kw_only=True, auto_attribs=True)
 class GeminiLLM(IRemoteLLM):
     model_id: str
-    api_key: str = field(default=os.getenv("GEMINI_API_KEY", "NONE"))
+    api_key: str = None
     _client: genai.Client = None
     _delay: float = field(default=0.1)
     _temperature: float = field(default=1.0)
     _top_p: float = field(default=0.95)
 
     def __attrs_post_init__(self):
+        if self.api_key is None:
+            self.api_key = os.getenv("GEMINI_API_KEY")
         if self._client is None:
             self._client = genai.Client(api_key=self.api_key)
 
