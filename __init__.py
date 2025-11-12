@@ -1,1 +1,1 @@
-from RemoteLLM import GeminiLLM, OpenAILLM, CerebrasLLM
+from RemoteLLM import GeminiLLM, OpenAILLM, CerebrasLLM, VllmLLM
