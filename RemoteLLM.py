@@ -77,7 +77,7 @@ class GeminiLLM(IRemoteLLM):
 @define(kw_only=True, auto_attribs=True)
 class OpenAILLM(IRemoteLLM):
     model_id: str
-    api_key: str = field(default=os.getenv("OPENAI_API_KEY", "NONE"))
+    api_key: str = None
     _url: str = field(default="https://api.openai.com/v1")
     _client: openai.OpenAI = None
     _delay: float = field(default=0.1)
@@ -85,6 +85,8 @@ class OpenAILLM(IRemoteLLM):
     _top_p: float = field(default=0.95)
 
     def __attrs_post_init__(self):
+        if self.api_key is None:
+            self.api_key = os.getenv("OPENAI_API_KEY")
         if self._client is None:
             self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
@@ -157,8 +159,14 @@ class OpenAILLM(IRemoteLLM):
 
 @define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
-    api_key: str = field(default=os.getenv("CEREBRAS_API_KEY", "NONE"))
+    api_key: str = None
     _url: str = field(default="https://api.cerebras.ai/v1")
+
+    def __attrs_post_init__(self):
+        if self.api_key is None:
+            self.api_key = os.getenv("CEREBRAS_API_KEY")
+        if self._client is None:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
     def image_text_chat(self, prompt, image):
         raise NotImplementedError(
