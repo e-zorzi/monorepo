@@ -52,7 +52,7 @@ class GeminiLLM(IRemoteLLM):
         image.save(image_bytes, format="PNG")
         image_bytes = image_bytes.getvalue()
 
-        response = self.client.models.generate_content(
+        response = self._client.models.generate_content(
             model=self.model_id,
             contents=[
                 genai.types.Part.from_bytes(
@@ -66,7 +66,7 @@ class GeminiLLM(IRemoteLLM):
         return response.text
 
     def text_chat(self, prompt, thinking_budget=None):
-        response = self.client.models.generate_content(
+        response = self._client.models.generate_content(
             model=self.model_id,
             contents=([prompt],),
             config=self._get_config(thinking_budget),
@@ -101,7 +101,7 @@ class OpenAILLM(IRemoteLLM):
     def image_text_chat(self, prompt, image):
         image_bytes = self._encode_image(image)
 
-        completion = self.client.chat.completions.create(
+        completion = self._client.chat.completions.create(
             model=self.model_id,
             messages=[
                 {
@@ -130,7 +130,7 @@ class OpenAILLM(IRemoteLLM):
         return stringbuilder
 
     def text_chat(self, prompt):
-        completion = self.client.chat.completions.create(
+        completion = self._client.chat.completions.create(
             model=self.model_id,
             messages=[
                 {
