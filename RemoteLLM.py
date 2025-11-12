@@ -174,3 +174,13 @@ class CerebrasLLM(OpenAILLM):
         raise NotImplementedError(
             "Cerebras still doesn't support multimodal serving. Try another class like `OpenAILLM' or `GeminiLLM'"
         )
+
+
+@define(kw_only=True, auto_attribs=True)
+class VllmLLM(OpenAILLM):
+    api_key: str = "EMPTY"
+    _url: str = field(default="http://localhost:8000/v1")
+
+    def __attrs_post_init__(self):
+        if self._client is None:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
