@@ -6,33 +6,6 @@ from io import BytesIO
 import openai
 from attrs import define, field
 
-PROMPT_WITH_CLASS = (
-    "You are a robot navigating an enclosed space. Your goal is to navigate to the correct object/scene based on the user's commands.\
-You were given the following task by the user '{USER_TASK}'. Currently, you are facing a scene represented by the given image, which contains a {OBJCLASS}. \
-Reason about the {OBJCLASS} that you are seeing in the image, comparing what you know about the task (given the user commands) and the given scene. For example, \
-if the task is 'Navigate to the black leather sofa near a lampstand' your reasoning process will be 'I'm currently observing a brown sofa \
-which is different than black, making it unlikely to be the target sofa. Moreover, there is no lampstand near it, only a rug and a window' \
-etc. If there are distortions or artifact, do not focus on them, focus on the object at hand. At the end of the reasoning process, give it a score from 1 to 5 on how much you are sure about the fact that the current observation \
-(given by the image) matches the target task given by the user, where 1 means 'extremely unlikely' and 5 'extremely likely'. Be concise (use at most 100 words) and return a response with \
- the following form: <motivation>Your motivations</motivation><score>Your score</score>"
-)
-
-PROMPT = (
-    "You are a robot navigating an enclosed space. Your goal is to navigate to the correct object/scene based on the user's commands.\
-You were given the following task by the user '{USER_TASK}'. Currently, you are facing a scene represented by the given image.\
-Reason about what you are seeing, comparing what you know about the task (given the user commands) and the given scene. For example, \
-if the task is 'Navigate to the black leather sofa near a lampstand' your reasoning process will be 'I'm currently observing a brown sofa \
-which is different than black, making it unlikely to be the target sofa. Moreover, there is no lampstand near it, only a rug and a window' \
-etc. If there are distortions or artifact, do not focus on them, focus on the object at hand. At the end of the reasoning process, give it a score from 1 to 5 on how much you are sure about the fact that the current observation \
-(given by the image) matches the target task given by the user, where 1 means 'extremely unlikely' and 5 'extremely likely'. Be concise (use at most 100 words) and return a response with \
- the following form: <motivation>Your motivations</motivation><score>Your score</score>"
-)
-
-PROMPT_ASK_FOR_PROPERTIES = "Currently, you are facing a scene represented by the given image, which contains a {OBJCLASS}. If there are distortions or artifact, do not focus on them, focus on the object at hand. \
-Answer these three questions: \
-    1. What color is the {OBJCLASS} that you are seeing? 2. What shape/dimensions does it have? 3. What other objects are near? \
-    Return an asnwer formatted like this <color>color answer</color>\n<shape>shape and dimension answer</shape>\n<objects>objects answer</objects>\n"
-
 
 class IRemoteLLM(ABC):
     @abstractmethod
