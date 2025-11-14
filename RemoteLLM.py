@@ -85,6 +85,7 @@ class OpenAILLM(IRemoteLLM):
     _delay: float = field(default=0.1)
     _temperature: float = field(default=1.0)
     _top_p: float = field(default=0.95)
+    _image_format: str = "png"
 
     def __attrs_post_init__(self):
         if self.api_key is None:
@@ -98,7 +99,7 @@ class OpenAILLM(IRemoteLLM):
 
     def _encode_image(self, image):
         im_file = BytesIO()
-        image.save(im_file, format="JPEG")
+        image.save(im_file, format=self._image_format.upper())
         im_bytes = im_file.getvalue()  # im_bytes: image in binary format.
         return base64.b64encode(im_bytes).decode("utf-8")
 
@@ -117,7 +118,7 @@ class OpenAILLM(IRemoteLLM):
                         },
                         {
                             "type": "image_url",
-                            "image_url": f"data:image/jpeg;base64,{image_bytes}",
+                            "image_url": f"data:image/{self._image_format.lower()};base64,{image_bytes}",
                         },
                     ],
                 }
