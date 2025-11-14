@@ -132,7 +132,7 @@ class OpenAILLM(IRemoteLLM):
         for chunk in completion:
             token = chunk.choices[0].delta.content
             if token:
-                stringbuilder += f"{token} "
+                stringbuilder += f"{token}"
 
         return stringbuilder
 
