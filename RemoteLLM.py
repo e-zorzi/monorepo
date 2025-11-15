@@ -5,6 +5,7 @@ import base64
 from io import BytesIO
 import openai
 from attrs import define, field
+from typing import Optional
 
 
 class IRemoteLLM(ABC):
@@ -182,8 +183,11 @@ class CerebrasLLM(OpenAILLM):
 @define(kw_only=True, auto_attribs=True)
 class VllmLLM(OpenAILLM):
     api_key: str = "EMPTY"
-    _url: str = field(default="http://localhost:8000/v1")
+    _port: int = field(default=8000)
+    _url: Optional[str] = None
 
     def __attrs_post_init__(self):
+        if self._url is None:
+            self._url = f"http://localhost:{self._port}/v1"
         if self._client is None:
             self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
