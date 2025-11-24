@@ -1,3 +1,13 @@
+"""
+Author: e-zorzi
+License: Apache 2.0
+"""
+
+"""TODO
+- QKV in single linear layer
+- Correct multihead implementation
+- Full transformer block
+"""
 import torch
 from math import sqrt
 from attrs import define, field

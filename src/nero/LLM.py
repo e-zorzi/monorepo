@@ -8,6 +8,13 @@ from attrs import define, field
 from typing import Optional
 
 
+def encode_image_b64(image, format):
+    im_file = BytesIO()
+    image.save(im_file, format=format.upper())
+    im_bytes = im_file.getvalue()  # im_bytes: image in binary format.
+    return base64.b64encode(im_bytes).decode("utf-8")
+
+
 class IRemoteLLM(ABC):
     @abstractmethod
     def image_text_chat(self, prompt: str, image, **kwargs):
@@ -99,10 +106,7 @@ class OpenAILLM(IRemoteLLM):
             return base64.b64encode(image_file.read()).decode("utf-8")
 
     def _encode_image(self, image):
-        im_file = BytesIO()
-        image.save(im_file, format=self._image_format.upper())
-        im_bytes = im_file.getvalue()  # im_bytes: image in binary format.
-        return base64.b64encode(im_bytes).decode("utf-8")
+        return encode_image_b64(image, self._image_format)
 
     def image_text_chat(self, prompt, image):
         image_bytes = self._encode_image(image)
