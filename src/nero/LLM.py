@@ -53,7 +53,9 @@ class GeminiLLM(IRemoteLLM):
             thinking_config=thinking_config,
         )
 
-    def image_text_chat(self, prompt, image, thinking_budget=None):
+    def image_text_chat(
+        self, prompt, image, thinking_budget=None, return_metadata: bool = False
+    ):
         image_bytes = BytesIO()
 
         # Save the PIL image to the byte stream in JPEG format.
@@ -73,15 +75,22 @@ class GeminiLLM(IRemoteLLM):
             ],
             config=self._get_config(thinking_budget),
         )
-        return response.text
 
-    def text_chat(self, prompt, thinking_budget=None):
+        if return_metadata:
+            return (response.text, response.usage_metadata)
+        else:
+            return response.text
+
+    def text_chat(self, prompt, thinking_budget=None, return_metadata: bool = False):
         response = self._client.models.generate_content(
             model=self.model_id,
             contents=([prompt],),
             config=self._get_config(thinking_budget),
         )
-        return response.text
+        if return_metadata:
+            return (response.text, response.usage_metadata)
+        else:
+            return response.text
 
 
 @define(kw_only=True, auto_attribs=True)
