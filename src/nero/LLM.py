@@ -7,6 +7,18 @@ import openai
 from attrs import define, field
 from typing import Optional
 
+# Per request. The maximum daily spend (in terms of input tokens) will be
+# ((N_tokens / 1_000_000) * RPD * price_per_1M) e.g. for Gemini2.5-pro,
+#  which costs around 2$ per 1M tokens (Nov 2025), with this the max daily
+# cost will be (20_000/1_000_000) * 10_000 * 2 = $400
+_SAFEGUARD_N_TOKENS = 20_000
+
+# Using the very-handwavy 4 letters = 1 token
+_SAFEGUARD_N_LETTERS = _SAFEGUARD_N_TOKENS * 4
+
+# For images
+_SAFEGUARD_IMAGE_RESOLUTION = 1024
+
 
 def encode_image_b64(image, format):
     im_file = BytesIO()
@@ -56,6 +68,11 @@ class GeminiLLM(IRemoteLLM):
     def image_text_chat(
         self, prompt, image, thinking_budget=None, return_metadata: bool = False
     ):
+        height, width = image.size
+        if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
+            raise ValueError(
+                f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
+            )
         image_bytes = BytesIO()
 
         # Save the PIL image to the byte stream in JPEG format.
@@ -71,7 +88,7 @@ class GeminiLLM(IRemoteLLM):
                     data=image_bytes,
                     mime_type="image/png",
                 ),
-                prompt,
+                prompt[:_SAFEGUARD_N_LETTERS],
             ],
             config=self._get_config(thinking_budget),
         )
@@ -84,7 +101,7 @@ class GeminiLLM(IRemoteLLM):
     def text_chat(self, prompt, thinking_budget=None, return_metadata: bool = False):
         response = self._client.models.generate_content(
             model=self.model_id,
-            contents=([prompt],),
+            contents=[prompt[:_SAFEGUARD_N_LETTERS]],
             config=self._get_config(thinking_budget),
         )
         if return_metadata:
@@ -118,6 +135,11 @@ class OpenAILLM(IRemoteLLM):
         return encode_image_b64(image, self._image_format)
 
     def image_text_chat(self, prompt, image):
+        height, width = image.size
+        if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
+            raise ValueError(
+                f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
+            )
         image_bytes = self._encode_image(image)
 
         completion = self._client.chat.completions.create(
@@ -128,7 +150,7 @@ class OpenAILLM(IRemoteLLM):
                     "content": [
                         {
                             "type": "text",
-                            "text": prompt,
+                            "text": prompt[:_SAFEGUARD_N_LETTERS],
                         },
                         {
                             "type": "image_url",
@@ -159,7 +181,7 @@ class OpenAILLM(IRemoteLLM):
                     "content": [
                         {
                             "type": "text",
-                            "text": prompt,
+                            "text": prompt[:_SAFEGUARD_N_LETTERS],
                         },
                     ],
                 }
