@@ -68,13 +68,18 @@ class GeminiLLM(IRemoteLLM):
     def image_text_chat(
         self, prompt, image, thinking_budget=None, return_metadata: bool = False
     ):
+        # Safety checks
         height, width = image.size
         if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
             raise ValueError(
                 f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
             )
-        image_bytes = BytesIO()
+        if len(prompt) > _SAFEGUARD_N_LETTERS:
+            print(
+                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
+            )
 
+        image_bytes = BytesIO()
         # Save the PIL image to the byte stream in JPEG format.
         # You can use other formats like 'PNG' as well.
         # For JPEG, you can also specify the quality, e.g., img.save(image_bytes_io, format='JPEG', quality=90)
@@ -99,6 +104,10 @@ class GeminiLLM(IRemoteLLM):
             return response.text
 
     def text_chat(self, prompt, thinking_budget=None, return_metadata: bool = False):
+        if len(prompt) > _SAFEGUARD_N_LETTERS:
+            print(
+                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
+            )
         response = self._client.models.generate_content(
             model=self.model_id,
             contents=[prompt[:_SAFEGUARD_N_LETTERS]],
@@ -135,13 +144,18 @@ class OpenAILLM(IRemoteLLM):
         return encode_image_b64(image, self._image_format)
 
     def image_text_chat(self, prompt, image):
+        # Safety checks
         height, width = image.size
         if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
             raise ValueError(
                 f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
             )
-        image_bytes = self._encode_image(image)
+        if len(prompt) > _SAFEGUARD_N_LETTERS:
+            print(
+                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
+            )
 
+        image_bytes = self._encode_image(image)
         completion = self._client.chat.completions.create(
             model=self.model_id,
             messages=[
@@ -173,6 +187,11 @@ class OpenAILLM(IRemoteLLM):
         return stringbuilder
 
     def text_chat(self, prompt):
+        if len(prompt) > _SAFEGUARD_N_LETTERS:
+            print(
+                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
+            )
+
         completion = self._client.chat.completions.create(
             model=self.model_id,
             messages=[
