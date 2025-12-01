@@ -1,5 +1,5 @@
 [project]
-name = "nero"
+name = "monorepo"
 version = "0.2.0"
 description = "Deep Learning personal utilities"
 readme = "README.md"
