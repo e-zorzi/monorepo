@@ -79,11 +79,14 @@ class GeminiLLM(IRemoteLLM):
                 f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
             )
 
+        image_format = image.format
+        if image_format is None or image_format == "None":
+            raise ValueError(
+                "Wrong image format. I got 'None'. Check how you constructed the image."
+            )
+
         image_bytes = BytesIO()
-        # Save the PIL image to the byte stream in JPEG format.
-        # You can use other formats like 'PNG' as well.
-        # For JPEG, you can also specify the quality, e.g., img.save(image_bytes_io, format='JPEG', quality=90)
-        image.save(image_bytes, format="PNG")
+        image.save(image_bytes, format=image_format.upper())
         image_bytes = image_bytes.getvalue()
 
         response = self._client.models.generate_content(
@@ -91,7 +94,7 @@ class GeminiLLM(IRemoteLLM):
             contents=[
                 genai.types.Part.from_bytes(
                     data=image_bytes,
-                    mime_type="image/png",
+                    mime_type=f"image/{image_format.lower()}",
                 ),
                 prompt[:_SAFEGUARD_N_LETTERS],
             ],
@@ -128,20 +131,12 @@ class OpenAILLM(IRemoteLLM):
     _delay: float = field(default=0.1)
     _temperature: float = field(default=1.0)
     _top_p: float = field(default=0.95)
-    _image_format: str = field(default="jpeg")
 
     def __attrs_post_init__(self):
         if self.api_key is None:
             self.api_key = os.getenv("OPENAI_API_KEY")
         if self._client is None:
             self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
-
-    def _encode_image_from_path(image_path):
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8")
-
-    def _encode_image(self, image):
-        return encode_image_b64(image, self._image_format)
 
     def image_text_chat(self, prompt, image):
         # Safety checks
@@ -155,7 +150,13 @@ class OpenAILLM(IRemoteLLM):
                 f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
             )
 
-        image_bytes = self._encode_image(image)
+        image_format = image.format
+        if image_format is None or image_format == "None":
+            raise ValueError(
+                "Wrong image format. I got 'None'. Check how you constructed the image."
+            )
+
+        image_bytes = encode_image_b64(image, image_format)
         completion = self._client.chat.completions.create(
             model=self.model_id,
             messages=[
@@ -169,7 +170,7 @@ class OpenAILLM(IRemoteLLM):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/{self._image_format.lower()};base64,{image_bytes}"
+                                "url": f"data:image/{image_format.lower()};base64,{image_bytes}"
                             },
                         },
                     ],
