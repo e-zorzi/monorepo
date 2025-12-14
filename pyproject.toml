@@ -1,6 +1,6 @@
 [project]
 name = "monorepo"
-version = "0.2.1"
+version = "0.2.2"
 description = "Deep Learning personal utilities"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,6 +9,11 @@ dependencies = [
     "datasets>=4.4.1",
     "google-genai>=1.49.0",
     "openai>=2.7.2",
-    "torch~=2.7",
-    "torchvision~=0.24",
 ]
+
+[dependency-groups]
+dev = [
+    "torch",
+    "torchvision",
+]
+
