@@ -1,4 +1,6 @@
 import subprocess
+from typing import Optional
+import os
 
 
 # From https://modal.com/docs/examples/diffusers_lora_finetune
@@ -17,3 +19,19 @@ def exec_subprocess(cmd: list[str]):
     exitcode = process.wait()
     if exitcode != 0:
         raise subprocess.CalledProcessError(exitcode, "\n".join(cmd))
+
+
+def no_risky_api_key_is_being_used() -> bool | Optional[str]:
+    environment_variables = os.environ
+    for var in environment_variables:
+        if (
+            var.find("OPENAI") != -1
+            or var.find("GEMINI") != -1
+            or var.find("CEREBRAS") != -1
+            or var.find("GROQ") != -1
+            or var.find("BACKBLAZE") != -1
+            or var.find("AWS") != -1
+            or var.find("S3") != -1
+        ):
+            return (False, var)
+    return (True, None)
