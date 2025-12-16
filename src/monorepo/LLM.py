@@ -152,6 +152,7 @@ class OpenAILLM(IRemoteLLM):
     _delay: float = field(default=0.1)
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
+    max_output_length: int = field(default=12000)
 
     def __attrs_post_init__(self):
         if self.api_key is None:
@@ -214,6 +215,7 @@ class OpenAILLM(IRemoteLLM):
             ],
             temperature=self.temperature,
             top_p=self.top_p,
+            max_tokens=int(self.max_output_length / 4),
             stream=True,
         )
         stringbuilder = ""
@@ -249,6 +251,7 @@ class OpenAILLM(IRemoteLLM):
             ],
             temperature=self.temperature,
             top_p=self.top_p,
+            max_tokens=int(self.max_output_length / 4),
             stream=True,
         )
         stringbuilder = ""
@@ -311,8 +314,7 @@ class GroqLLM(OpenAILLM):
     ):
         if self.model_id not in _VALID_GROQ_MULTIMODAL_MODELS:
             raise ValueError(
-                f"Groq only supports the following models for multimodal serving: 'meta-llama/llama-4-maverick-17b-128e-instruct', \
-                'meta-llama/llama-4-scout-17b-16e-instruct' and 'meta-llama/llama-guard-4-12b' (as of {_VALID_GROQ_DATE}) "
+                f"Groq only supports the following models for multimodal serving: 'meta-llama/llama-4-maverick-17b-128e-instruct', 'meta-llama/llama-4-scout-17b-16e-instruct' and 'meta-llama/llama-guard-4-12b' (as of {_VALID_GROQ_DATE})"
             )
         return super().image_text_chat(prompt, image)
 
