@@ -6,6 +6,8 @@ from io import BytesIO
 import openai
 from attrs import define, field
 from typing import Optional
+import numpy as np
+from PIL import Image
 
 # Per request. The maximum daily spend (in terms of input tokens) will be
 # ((N_tokens / 1_000_000) * RPD * price_per_1M) e.g. for Gemini2.5-pro,
@@ -41,16 +43,15 @@ class IRemoteLLM(ABC):
 class GeminiLLM(IRemoteLLM):
     model_id: str
     api_key: str = None
-    _client: genai.Client = None
     _delay: float = field(default=0.1)
-    _temperature: float = field(default=1.0)
-    _top_p: float = field(default=0.95)
+    temperature: float = field(default=1.0)
+    top_p: float = field(default=0.95)
 
     def __attrs_post_init__(self):
         if self.api_key is None:
             self.api_key = os.getenv("GEMINI_API_KEY")
-        if self._client is None:
-            self._client = genai.Client(api_key=self.api_key)
+
+        self._client = genai.Client(api_key=self.api_key)
 
     def _get_config(self, thinking_budget=None):
         if thinking_budget is None:
@@ -60,14 +61,30 @@ class GeminiLLM(IRemoteLLM):
                 include_thoughts=True, thinking_budget=thinking_budget
             )
         return genai.types.GenerateContentConfig(
-            temperature=self._temperature,
-            top_p=self._top_p,
+            temperature=self.temperature,
+            top_p=self.top_p,
             thinking_config=thinking_config,
         )
 
     def image_text_chat(
-        self, prompt, image, thinking_budget=None, return_metadata: bool = False
+        self,
+        prompt,
+        image,
+        thinking_budget=None,
+        return_metadata: bool = False,
     ):
+        # Handle arrays
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+            image_format = "png"
+        else:
+            image_format = image.format
+
+        if image_format is None or image_format == "None":
+            raise ValueError(
+                "Wrong image format. I got 'None'. Check how you constructed the image."
+            )
+
         # Safety checks
         height, width = image.size
         if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
@@ -106,7 +123,12 @@ class GeminiLLM(IRemoteLLM):
         else:
             return response.text
 
-    def text_chat(self, prompt, thinking_budget=None, return_metadata: bool = False):
+    def text_chat(
+        self,
+        prompt,
+        thinking_budget=None,
+        return_metadata: bool = False,
+    ):
         if len(prompt) > _SAFEGUARD_N_LETTERS:
             print(
                 f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
@@ -127,18 +149,32 @@ class OpenAILLM(IRemoteLLM):
     model_id: str
     api_key: str = None
     _url: str = field(default="https://api.openai.com/v1")
-    _client: openai.OpenAI = None
     _delay: float = field(default=0.1)
-    _temperature: float = field(default=1.0)
-    _top_p: float = field(default=0.95)
+    temperature: float = field(default=1.0)
+    top_p: float = field(default=0.95)
 
     def __attrs_post_init__(self):
         if self.api_key is None:
             self.api_key = os.getenv("OPENAI_API_KEY")
-        if self._client is None:
-            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
-    def image_text_chat(self, prompt, image):
+    def image_text_chat(
+        self,
+        prompt,
+        image,
+    ):
+        # Handle arrays
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+            image_format = "png"
+        else:
+            image_format = image.format
+
+        if image_format is None or image_format == "None":
+            raise ValueError(
+                "Wrong image format. I got 'None'. Check how you constructed the image."
+            )
+
         # Safety checks
         height, width = image.size
         if height > _SAFEGUARD_IMAGE_RESOLUTION or width > _SAFEGUARD_IMAGE_RESOLUTION:
@@ -176,6 +212,8 @@ class OpenAILLM(IRemoteLLM):
                     ],
                 }
             ],
+            temperature=self.temperature,
+            top_p=self.top_p,
             stream=True,
         )
         stringbuilder = ""
@@ -187,7 +225,10 @@ class OpenAILLM(IRemoteLLM):
 
         return stringbuilder
 
-    def text_chat(self, prompt):
+    def text_chat(
+        self,
+        prompt,
+    ):
         if len(prompt) > _SAFEGUARD_N_LETTERS:
             print(
                 f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
@@ -206,6 +247,8 @@ class OpenAILLM(IRemoteLLM):
                     ],
                 }
             ],
+            temperature=self.temperature,
+            top_p=self.top_p,
             stream=True,
         )
         stringbuilder = ""
@@ -225,14 +268,53 @@ class CerebrasLLM(OpenAILLM):
 
     def __attrs_post_init__(self):
         if self.api_key is None:
-            self.api_key = os.getenv("CEREBRAS_API_KEY")
-        if self._client is None:
-            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+            if "CEREBRAS_API_KEY" not in os.environ:
+                print("[WARNING] Missing CEREBRAS_API_KEY in environment!")
+            self.api_key = os.getenv("CEREBRAS_API_KEY", "<|MISSING_API_KEY|>")
 
-    def image_text_chat(self, prompt, image):
+        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+
+    def image_text_chat(
+        self,
+        prompt,
+        image,
+    ):
         raise NotImplementedError(
             "Cerebras still doesn't support multimodal serving. Try another class like `OpenAILLM' or `GeminiLLM'"
         )
+
+
+_VALID_GROQ_MULTIMODAL_MODELS = [
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-guard-4-12b",
+]
+_VALID_GROQ_DATE = "2025-12-16"
+
+
+@define(kw_only=True, auto_attribs=True)
+class GroqLLM(OpenAILLM):
+    api_key: str = None
+    _url: str = field(default="https://api.groq.com/openai/v1")
+
+    def __attrs_post_init__(self):
+        if self.api_key is None:
+            if "GROQ_API_KEY" not in os.environ:
+                print("[WARNING] Missing GROQ_API_KEY in environment!")
+            self.api_key = os.getenv("GROQ_API_KEY", "<|MISSING_API_KEY|>")
+        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+
+    def image_text_chat(
+        self,
+        prompt,
+        image,
+    ):
+        if self.model_id not in _VALID_GROQ_MULTIMODAL_MODELS:
+            raise ValueError(
+                f"Groq only supports the following models for multimodal serving: 'meta-llama/llama-4-maverick-17b-128e-instruct', \
+                'meta-llama/llama-4-scout-17b-16e-instruct' and 'meta-llama/llama-guard-4-12b' (as of {_VALID_GROQ_DATE}) "
+            )
+        return super().image_text_chat(prompt, image)
 
 
 @define(kw_only=True, auto_attribs=True)
@@ -244,5 +326,22 @@ class VllmLLM(OpenAILLM):
     def __attrs_post_init__(self):
         if self._url is None:
             self._url = f"http://localhost:{self._port}/v1"
-        if self._client is None:
-            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+
+        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+
+
+## Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
+# @define(kw_only=True, auto_attribs=True)
+# class VllmOfflineLLM(IRemoteLLM):
+#     model_id: str
+#     temperature: float = field(default=1.0)
+#     top_p: float = field(default=0.95)
+
+#     def __attrs_post_init__(self):
+#         #self._sampling_params =
+
+#     def text_chat(self, prompt):
+#         return super().text_chat(prompt, )
+
+#     def image_text_chat(self, prompt, image, **kwargs):
+#         return super().image_text_chat(prompt, image, **kwargs)
