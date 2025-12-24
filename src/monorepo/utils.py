@@ -1,6 +1,9 @@
 import subprocess
 from typing import Optional
 import os
+from colorama import Fore, init as colorama_init
+
+colorama_init(autoreset=True)
 
 
 # From https://modal.com/docs/examples/diffusers_lora_finetune
@@ -35,3 +38,38 @@ def no_risky_api_key_is_being_used() -> bool | Optional[str]:
         ):
             return (False, var)
     return (True, None)
+
+
+def download_bare_repo_hf(repo_id, local_dir):
+    from huggingface_hub import snapshot_download
+
+    # Download and cache files
+    # snapshot_download(repo_id)
+
+    # Download and cache files + add symlinks in "my-folder"
+    # snapshot_download(repo_id, local_dir="my-folder")
+
+    # Duplicate files already existing in cache
+    # and/or
+    # Download missing files directly to "my-folder"
+    #     => if ran multiple times, files are re-downloaded
+    try:
+        snapshot_download(
+            repo_id,
+            local_dir=local_dir,
+            local_dir_use_symlinks=False,
+            repo_type="dataset",
+        )
+    except Exception as e:
+        print(
+            Fore.YELLOW
+            + "[WARN] I did encounter an error trying to download the repo. Trying again"
+            + " with a different configuration."
+            + Fore.WHITE
+        )
+        snapshot_download(
+            repo_id,
+            local_dir=local_dir,
+            local_dir_use_symlinks=False,
+            repo_type="model",
+        )

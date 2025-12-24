@@ -8,6 +8,9 @@ from attrs import define, field
 from typing import Optional
 import numpy as np
 from PIL import Image
+from colorama import Fore, init as colorama_init
+
+colorama_init(autoreset=True)
 
 # Per request. The maximum daily spend (in terms of input tokens) will be
 # ((N_tokens / 1_000_000) * RPD * price_per_1M) e.g. for Gemini2.5-pro,
@@ -20,6 +23,33 @@ _SAFEGUARD_N_LETTERS = _SAFEGUARD_N_TOKENS * 4
 
 # For images
 _SAFEGUARD_IMAGE_RESOLUTION = 1024
+
+# GROQ Multimodal models
+
+_VALID_GROQ_MULTIMODAL_MODELS = [
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "meta-llama/llama-guard-4-12b",
+]
+_VALID_GROQ_DATE = "2025-12-16"
+
+
+def _warn_requires_vllm(model_id):
+    print(
+        Fore.YELLOW
+        + f"[WARN] `LocalOnlineLLM` requires a connection with a local VLLM server. \
+Make sure to run the command `vllm serve {model_id}` in a terminal, and wait for its initialization."
+        + Fore.WHITE
+    )
+
+
+def _warn_prompt_too_long(len_prompt, safeguard_length):
+    print(
+        Fore.YELLOW
+        + f"[WARN] The passed prompt has length {len_prompt}, greater than the maximum allowed: {safeguard_length}. It will be truncated accordingly.\
+If you want to increase this limit, change the constant _SAFEGUARD_N_LETTERS in the file from which you import this class."
+        + Fore.WHITE
+    )
 
 
 def encode_image_b64(image, format):
@@ -92,11 +122,8 @@ class GeminiLLM(IRemoteLLM):
                 f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
             )
         if len(prompt) > _SAFEGUARD_N_LETTERS:
-            print(
-                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
-            )
+            _warn_prompt_too_long(len(prompt), _SAFEGUARD_N_LETTERS)
 
-        image_format = image.format
         if image_format is None or image_format == "None":
             raise ValueError(
                 "Wrong image format. I got 'None'. Check how you constructed the image."
@@ -130,9 +157,8 @@ class GeminiLLM(IRemoteLLM):
         return_metadata: bool = False,
     ):
         if len(prompt) > _SAFEGUARD_N_LETTERS:
-            print(
-                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
-            )
+            _warn_prompt_too_long(len(prompt), _SAFEGUARD_N_LETTERS)
+
         response = self._client.models.generate_content(
             model=self.model_id,
             contents=[prompt[:_SAFEGUARD_N_LETTERS]],
@@ -183,11 +209,8 @@ class OpenAILLM(IRemoteLLM):
                 f"Image size safeguard: passed an image of resolution {width} x {height}, larger than the safeguard {_SAFEGUARD_IMAGE_RESOLUTION} x {_SAFEGUARD_IMAGE_RESOLUTION}"
             )
         if len(prompt) > _SAFEGUARD_N_LETTERS:
-            print(
-                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
-            )
+            _warn_prompt_too_long(len(prompt), _SAFEGUARD_N_LETTERS)
 
-        image_format = image.format
         if image_format is None or image_format == "None":
             raise ValueError(
                 "Wrong image format. I got 'None'. Check how you constructed the image."
@@ -232,9 +255,7 @@ class OpenAILLM(IRemoteLLM):
         prompt,
     ):
         if len(prompt) > _SAFEGUARD_N_LETTERS:
-            print(
-                f"!! Warning !! The passed prompt has length {len(prompt)}, greater than the maximum allowed: {_SAFEGUARD_N_LETTERS}. It will be truncated accordingly."
-            )
+            _warn_prompt_too_long(len(prompt), _SAFEGUARD_N_LETTERS)
 
         completion = self._client.chat.completions.create(
             model=self.model_id,
@@ -287,14 +308,6 @@ class CerebrasLLM(OpenAILLM):
         )
 
 
-_VALID_GROQ_MULTIMODAL_MODELS = [
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-guard-4-12b",
-]
-_VALID_GROQ_DATE = "2025-12-16"
-
-
 @define(kw_only=True, auto_attribs=True)
 class GroqLLM(OpenAILLM):
     api_key: str = None
@@ -320,30 +333,40 @@ class GroqLLM(OpenAILLM):
 
 
 @define(kw_only=True, auto_attribs=True)
-class VllmLLM(OpenAILLM):
+class LocalOnlineLLM(OpenAILLM):
     api_key: str = "EMPTY"
     _port: int = field(default=8000)
     _url: Optional[str] = None
 
     def __attrs_post_init__(self):
+        _warn_requires_vllm(self.model_id)
+
         if self._url is None:
             self._url = f"http://localhost:{self._port}/v1"
 
         self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
 
-## Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
-# @define(kw_only=True, auto_attribs=True)
-# class VllmOfflineLLM(IRemoteLLM):
-#     model_id: str
-#     temperature: float = field(default=1.0)
-#     top_p: float = field(default=0.95)
+# Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
+@define(kw_only=True, auto_attribs=True)
+class LocalOfflineLLM(IRemoteLLM):
+    model_id: str
+    temperature: float = field(default=1.0)
+    top_p: float = field(default=0.95)
 
-#     def __attrs_post_init__(self):
-#         #self._sampling_params =
+    def __attrs_post_init__(self):
+        # self._sampling_params =
+        try:
+            from vllm import LLM
+        except (ImportError, ModuleNotFoundError) as e:
+            print(
+                Fore.RED
+                + "[ERROR] `LocalOfflineLLM` requires the library `vllm`. Install it."
+            )
+            raise e
 
-#     def text_chat(self, prompt):
-#         return super().text_chat(prompt, )
+    def text_chat(self, prompt):
+        raise NotImplementedError
 
-#     def image_text_chat(self, prompt, image, **kwargs):
-#         return super().image_text_chat(prompt, image, **kwargs)
+    def image_text_chat(self, prompt, image, **kwargs):
+        raise NotImplementedError
