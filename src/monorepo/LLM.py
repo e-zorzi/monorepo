@@ -12,6 +12,7 @@ import numpy as np
 from PIL import Image
 from colorama import Fore, init as colorama_init
 from uuid import uuid4
+from monorepo.utils import load_api_keys
 
 colorama_init(autoreset=True)
 
@@ -67,6 +68,7 @@ def encode_image_b64(image, format):
 
 
 def get_batch_result(request_info_path: Union[str, os.PathLike]):
+    load_api_keys()
     with open(request_info_path, "r") as read_handle:
         batch_name = read_handle.readlines()[0]
         batch_name.rstrip("\n ")
@@ -96,10 +98,15 @@ def get_batch_result(request_info_path: Union[str, os.PathLike]):
             lines = file_content.decode("utf-8").split("\n")
             for line in lines:
                 if line != "":
-                    write_handle.write(json.dumps(eval(line)))
+                    write_handle.write(
+                        json.dumps(eval(line.replace('":true', '":True')))
+                    )
                     write_handle.write("\n")
     elif batch_job.state.name == "JOB_STATE_PENDING":
         print(Fore.YELLOW + "[INFO] Job still pending" + Fore.WHITE)
+        print(batch_job)
+    else:
+        print(batch_job)
 
 
 class IRemoteLLM(ABC):
@@ -121,6 +128,18 @@ class GeminiLLM(IRemoteLLM):
     _delay: float = field(default=0.1)
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
+    aspect_ratio: str = field(default="1:1")
+    image_size: str = field(default="1k")
+
+    @aspect_ratio.validator
+    def _aspect_ratio_check(self, attr, val):
+        if val not in ["1:1", "16:9", "4:3", "3:4", "9:16", "2:3", "3:2"]:
+            raise ValueError()
+
+    @image_size.validator
+    def _image_size_check(self, attr, val):
+        if val not in ["1k", "2k", "4k"]:
+            raise ValueError()
 
     def __attrs_post_init__(self):
         if self.api_key is None:
@@ -130,17 +149,48 @@ class GeminiLLM(IRemoteLLM):
 
         self._client = genai.Client(api_key=self.api_key)
 
-    def _get_config(self, thinking_budget=None):
+    def _get_config(
+        self,
+        thinking_budget=None,
+        aspect_ratio=None,
+        image_size=None,
+        generate_images: bool = False,
+        as_dict: bool = False,
+    ):
         if thinking_budget is None:
-            thinking_config = genai.types.ThinkingConfig(include_thoughts=True)
-        else:
-            thinking_config = genai.types.ThinkingConfig(
-                include_thoughts=True, thinking_budget=thinking_budget
+            thinking_config = (
+                genai.types.ThinkingConfig(include_thoughts=True)
+                if not as_dict
+                else dict(include_thoughts=True)
             )
+        else:
+            thinking_config = (
+                genai.types.ThinkingConfig(
+                    include_thoughts=True, thinking_budget=thinking_budget
+                )
+                if not as_dict
+                else dict(include_thoughts=True, thinking_budget=thinking_budget)
+            )
+        # Generate image config
+        aspect_ratio = aspect_ratio if aspect_ratio is not None else self.aspect_ratio
+        image_size = image_size if image_size is not None else self.image_size
+
+        image_config = (
+            genai.types.ImageConfig(aspect_ratio=aspect_ratio, image_size=image_size)
+            if not as_dict
+            else dict(aspect_ratio=aspect_ratio, image_size=image_size)
+        )
+        if generate_images:
+            response_modalities = ["TEXT", "IMAGE"]
+        else:
+            response_modalities = ["TEXT"]
+
         return genai.types.GenerateContentConfig(
             temperature=self.temperature,
             top_p=self.top_p,
             thinking_config=thinking_config,
+            image_config=image_config,
+            response_modalities=response_modalities,
         )
 
     def _image_text_chat(
@@ -225,7 +275,7 @@ class GeminiLLM(IRemoteLLM):
         return_metadata: bool = False,
         **kwargs,
     ) -> str:
-        """_summary_
+        """Primary method for generating (multimodal or unimodal) requests
 
         Args:
             prompt (str): text prompt
@@ -256,18 +306,20 @@ class GeminiLLM(IRemoteLLM):
         *,
         prompt: str,
         images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
-        thinking_budget=None,
-        return_metadata: bool = False,
+        generate_images: bool = False,
+        thinking_budget: int = None,
+        aspect_ratio: str = None,
+        image_size: str = None,
         **kwargs,
     ):
-        """_summary_
+        """Primary method for generating batch requests
 
         Args:
             prompt (str): text prompt
             images (Iterable[Union[np.ndarray, &quot;Image&quot;]], optional): a set of images related to the prompt, if a multimodal chat is required
 
         Returns:
-            dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a jsonl file)
+            dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a JSONL file)
         """
         id = uuid4().hex
         version = 1
@@ -290,8 +342,10 @@ class GeminiLLM(IRemoteLLM):
                 image.save(img_path, format=image_format.lower())
                 img_paths.append(img_path)
 
-        generation_config = dict(temperature=self.temperature, top_p=self.top_p)
-        thinking_budget = thinking_budget
+        generation_config = self._get_config(
+            thinking_budget, aspect_ratio, image_size, generate_images, as_dict=True
+        )
+
         return dict(
             version=version,
             id=id,
@@ -299,10 +353,24 @@ class GeminiLLM(IRemoteLLM):
             n_imgs=len(img_paths),
             img_paths=img_paths,
             generation_config=generation_config,
-            thinking_budget=thinking_budget,
         )
 
-    def submit_batch(self, jsonl_file_path: Union[str, os.PathLike]) -> str:
+    def submit_batch(
+        self,
+        jsonl_file_path: Union[str, os.PathLike],
+    ) -> str:
+        """Submits a batch request to Gemini via a JSONL file
+
+        Args:
+            jsonl_file_path (Union[str, os.PathLike]): path to a JSONL file containing a 'version 1'
+                                                       object per line (obtained from `ask_for_later`)
+
+        Raises:
+            NotImplementedError: if any request-like object have 'version' > 1 (not supported at the moment)
+
+        Returns:
+            str: the path to the file containing info about the submitted batch (can be use for retrieval later)
+        """
         now = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
         uuid = uuid4().hex
 
@@ -320,20 +388,25 @@ class GeminiLLM(IRemoteLLM):
 
         with open(f"{new_file_path}.jsonl", "a") as write_handle:
             for job in jobs:
-                if job["version"] == 1:
+                # Well-formatted JSON request object to be directly sent to Gemini without transformations
+                if "key" in job and "request" in job:
+                    json.dump(
+                        job,
+                        write_handle,
+                    )
+                    write_handle.write("\n")
+                elif job["version"] == 1:
+                    # Our custom request-like object that has to be transformed.
+                    # Why we support a custom format? Because we can, by doing so,
+                    # handle image uploading + batch processing in two phases, avoiding to
+                    # include images in base64 format (very large) inside the requests directly
                     id = f"key-{job['id']}"
                     generation_config = job["generation_config"]
-                    thinking_budget = job["thinking_budget"]
                     contents = [{"parts": [], "role": "user"}]
                     if job["n_imgs"] > 0:
                         for img_path in job["img_paths"]:
                             # Need to upload the image to Gemini and get the file path
                             uploaded_file = self._client.files.upload(file=img_path)
-                            print(
-                                Fore.CYAN
-                                + "[INFO] Uploaded file to Gemini Files API: "
-                                + uploaded_file.name
-                            )
 
                             # Safer to do it like this
                             image_format = Image.open(img_path).format
@@ -344,6 +417,10 @@ class GeminiLLM(IRemoteLLM):
                                     "mimeType": f"image/{image_format.lower()}",
                                 }
                             })
+                        print(
+                            Fore.CYAN
+                            + f"[INFO] Uploaded {job['n_imgs']} images using Gemini Files API"
+                        )
                     request_dict = dict(
                         contents=contents, generation_config=generation_config
                     )
@@ -368,9 +445,7 @@ class GeminiLLM(IRemoteLLM):
         file_batch_job = self._client.batches.create(
             model=self.model_id,
             src=batch_job.name,
-            config={
-                "display_name": f"my-batch-requests-{cur_name}",
-            },
+            config={"display_name": f"my-batch-requests-{cur_name}"},
         )
 
         print(f"Created batch job: {file_batch_job.name}")
