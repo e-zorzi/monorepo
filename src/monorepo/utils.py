@@ -24,6 +24,17 @@ def exec_subprocess(cmd: list[str]):
         raise subprocess.CalledProcessError(exitcode, "\n".join(cmd))
 
 
+def load_api_keys(dotenv_path: str = None):
+    from dotenv import load_dotenv
+
+    if dotenv_path is not None:
+        print(f"Loaded dotenv file at {dotenv_path}: {load_dotenv(dotenv_path)}")
+    else:
+        print(
+            f"Loaded dotenv file at $HOME/.env.ml: {load_dotenv(os.path.join(os.environ['HOME'], '.env.ml'))}"
+        )
+
+
 def no_risky_api_key_is_being_used() -> bool | Optional[str]:
     environment_variables = os.environ
     for var in environment_variables:

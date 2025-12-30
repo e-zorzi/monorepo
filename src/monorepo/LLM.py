@@ -5,7 +5,7 @@ import base64
 from io import BytesIO
 import openai
 from attrs import define, field
-from typing import Optional
+from typing import Optional, Union, Iterable
 import numpy as np
 from PIL import Image
 from colorama import Fore, init as colorama_init
@@ -34,11 +34,11 @@ _VALID_GROQ_MULTIMODAL_MODELS = [
 _VALID_GROQ_DATE = "2025-12-16"
 
 
-def _warn_requires_vllm(model_id):
+def _warn_requires_vllm(classname, model_id):
     print(
         Fore.YELLOW
-        + f"[WARN] `LocalOnlineLLM` requires a connection with a local VLLM server. \
-Make sure to run the command `vllm serve {model_id}` in a terminal, and wait for its initialization."
+        + f"[WARN] `{classname}` requires a connection with a local VLLM server. \
+Make sure to run the command `vllm serve {model_id} <options>` in a terminal, and wait for its initialization."
         + Fore.WHITE
     )
 
@@ -52,6 +52,10 @@ If you want to increase this limit, change the constant _SAFEGUARD_N_LETTERS in 
     )
 
 
+def _warn_missing_key(key_name):
+    print(Fore.RED + f"[ERROR] {key_name} is missing in the environment." + Fore.WHITE)
+
+
 def encode_image_b64(image, format):
     im_file = BytesIO()
     image.save(im_file, format=format.upper())
@@ -61,11 +65,23 @@ def encode_image_b64(image, format):
 
 class IRemoteLLM(ABC):
     @abstractmethod
-    def image_text_chat(self, prompt: str, image, **kwargs):
+    def ask(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, "Image"]],  # type: ignore
+        **kwargs,
+    ) -> str:
         pass
 
     @abstractmethod
-    def text_chat(self, prompt: str, **kwargs):
+    def ask_for_later(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, "Image"]],  # type: ignore
+        **kwargs,
+    ) -> dict:
         pass
 
 
@@ -79,7 +95,9 @@ class GeminiLLM(IRemoteLLM):
 
     def __attrs_post_init__(self):
         if self.api_key is None:
-            self.api_key = os.getenv("GEMINI_API_KEY")
+            self.api_key = os.getenv(
+                "GEMINI_API_KEY",
+            )
 
         self._client = genai.Client(api_key=self.api_key)
 
@@ -96,7 +114,7 @@ class GeminiLLM(IRemoteLLM):
             thinking_config=thinking_config,
         )
 
-    def image_text_chat(
+    def _image_text_chat(
         self,
         prompt,
         image,
@@ -150,7 +168,7 @@ class GeminiLLM(IRemoteLLM):
         else:
             return response.text
 
-    def text_chat(
+    def _text_chat(
         self,
         prompt,
         thinking_budget=None,
@@ -169,6 +187,94 @@ class GeminiLLM(IRemoteLLM):
         else:
             return response.text
 
+    def ask(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        thinking_budget=None,
+        return_metadata: bool = False,
+        **kwargs,
+    ) -> str:
+        """_summary_
+
+        Args:
+            prompt (str): text prompt
+            images (Iterable[Union[np.ndarray, &quot;Image&quot;]], optional): a set of images related to the prompt, if a multimodal chat is required
+
+        Returns:
+            str: the response of the model
+        """
+        if images is not None:
+            assert len(images) == 1, "Only 1 image is supported at the moment"
+            return self._image_text_chat(
+                prompt,
+                images[0],
+                thinking_budget=thinking_budget,
+                return_metadata=return_metadata,
+                **kwargs,
+            )
+        else:
+            return self._text_chat(
+                prompt,
+                thinking_budget=thinking_budget,
+                return_metadata=return_metadata,
+                **kwargs,
+            )
+
+    def ask_for_later(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        thinking_budget=None,
+        return_metadata: bool = False,
+        **kwargs,
+    ):
+        """_summary_
+
+        Args:
+            prompt (str): text prompt
+            images (Iterable[Union[np.ndarray, &quot;Image&quot;]], optional): a set of images related to the prompt, if a multimodal chat is required
+
+        Returns:
+            dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a jsonl file)
+        """
+        # TODO
+        # uploaded_image = self._client.files.upload(
+        #     file="/home/edoardo/monorepo/carpet.png"
+        # )
+        # print(uploaded_image.name)
+
+        # inline_requests = [
+        #     {
+        #         "contents": [
+        #             {
+        #                 "parts": [
+        #                     {
+        #                         "fileData": {
+        #                             "fileUri": "https://generativelanguage.googleapis.com/files/7uqi69igcxyw",
+        #                             "mimeType": "image/png",
+        #                         }
+        #                     },
+        #                     {"text": "Describe this image."},
+        #                 ],
+        #                 "role": "user",
+        #             }
+        #         ]
+        #     }
+        # ]
+
+        # inline_batch_job = self._client.batches.create(
+        #     model="models/gemini-2.5-flash",
+        #     src=inline_requests,
+        #     config={
+        #         "display_name": "inlined-requests-job-1",
+        #     },
+        # )
+
+        # print(f"Created batch job: {inline_batch_job.name}")
+
 
 @define(kw_only=True, auto_attribs=True)
 class OpenAILLM(IRemoteLLM):
@@ -183,13 +289,13 @@ class OpenAILLM(IRemoteLLM):
     def __attrs_post_init__(self):
         if self.api_key is None:
             self.api_key = os.getenv("OPENAI_API_KEY")
-        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        try:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        except openai.OpenAIError as e:
+            _warn_missing_key("OPENAI_API_KEY")
+            raise e
 
-    def image_text_chat(
-        self,
-        prompt,
-        image,
-    ):
+    def _image_text_chat(self, prompt, image, **kwargs):
         # Handle arrays
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
@@ -224,14 +330,14 @@ class OpenAILLM(IRemoteLLM):
                     "role": "user",
                     "content": [
                         {
-                            "type": "text",
-                            "text": prompt[:_SAFEGUARD_N_LETTERS],
-                        },
-                        {
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:image/{image_format.lower()};base64,{image_bytes}"
                             },
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt[:_SAFEGUARD_N_LETTERS],
                         },
                     ],
                 }
@@ -250,9 +356,10 @@ class OpenAILLM(IRemoteLLM):
 
         return stringbuilder
 
-    def text_chat(
+    def _text_chat(
         self,
         prompt,
+        **kwargs,
     ):
         if len(prompt) > _SAFEGUARD_N_LETTERS:
             _warn_prompt_too_long(len(prompt), _SAFEGUARD_N_LETTERS)
@@ -284,6 +391,38 @@ class OpenAILLM(IRemoteLLM):
 
         return stringbuilder
 
+    def ask(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        **kwargs,
+    ) -> str:
+        """_summary_
+
+        Args:
+            prompt (str): text prompt
+            images (Iterable[Union[np.ndarray, &quot;Image&quot;]], optional): a set of images related to the prompt, if a multimodal chat is required
+
+        Returns:
+            str: the response of the model
+        """
+        if images is not None:
+            assert len(images) == 1, "Only 1 image is supported at the moment"
+            return self._image_text_chat(
+                prompt,
+                images[0],
+                **kwargs,
+            )
+        else:
+            return self._text_chat(
+                prompt,
+                **kwargs,
+            )
+
+    def ask_for_later(self, *, prompt, images, **kwargs):
+        raise NotImplementedError
+
 
 @define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
@@ -292,19 +431,23 @@ class CerebrasLLM(OpenAILLM):
 
     def __attrs_post_init__(self):
         if self.api_key is None:
-            if "CEREBRAS_API_KEY" not in os.environ:
-                print("[WARNING] Missing CEREBRAS_API_KEY in environment!")
-            self.api_key = os.getenv("CEREBRAS_API_KEY", "<|MISSING_API_KEY|>")
+            self.api_key = os.getenv("CEREBRAS_API_KEY")
 
-        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        try:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        except openai.OpenAIError:
+            _warn_missing_key("CEREBRAS_API_KEY")
+            raise openai.OpenAIError(
+                "The api_key client option must be set either by passing api_key to the client or by setting the CEREBRAS_API_KEY environment variable"
+            )
 
-    def image_text_chat(
+    def _image_text_chat(
         self,
         prompt,
         image,
     ):
         raise NotImplementedError(
-            "Cerebras still doesn't support multimodal serving. Try another class like `OpenAILLM' or `GeminiLLM'"
+            "Cerebras doesn't support multimodal serving at the moment. Try another class like `OpenAILLM' or `GeminiLLM'"
         )
 
 
@@ -315,12 +458,16 @@ class GroqLLM(OpenAILLM):
 
     def __attrs_post_init__(self):
         if self.api_key is None:
-            if "GROQ_API_KEY" not in os.environ:
-                print("[WARNING] Missing GROQ_API_KEY in environment!")
-            self.api_key = os.getenv("GROQ_API_KEY", "<|MISSING_API_KEY|>")
-        self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+            self.api_key = os.getenv("GROQ_API_KEY")
+        try:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        except openai.OpenAIError:
+            _warn_missing_key("GROQ_API_KEY")
+            raise openai.OpenAIError(
+                "The api_key client option must be set either by passing api_key to the client or by setting the GROQ_API_KEY environment variable"
+            )
 
-    def image_text_chat(
+    def _image_text_chat(
         self,
         prompt,
         image,
@@ -329,17 +476,17 @@ class GroqLLM(OpenAILLM):
             raise ValueError(
                 f"Groq only supports the following models for multimodal serving: 'meta-llama/llama-4-maverick-17b-128e-instruct', 'meta-llama/llama-4-scout-17b-16e-instruct' and 'meta-llama/llama-guard-4-12b' (as of {_VALID_GROQ_DATE})"
             )
-        return super().image_text_chat(prompt, image)
+        return super()._image_text_chat(prompt, image)
 
 
 @define(kw_only=True, auto_attribs=True)
-class LocalOnlineLLM(OpenAILLM):
+class ClientBasedLLM(OpenAILLM):
     api_key: str = "EMPTY"
     _port: int = field(default=8000)
     _url: Optional[str] = None
 
     def __attrs_post_init__(self):
-        _warn_requires_vllm(self.model_id)
+        _warn_requires_vllm(self.__class__.__name__, self.model_id)
 
         if self._url is None:
             self._url = f"http://localhost:{self._port}/v1"
@@ -349,7 +496,7 @@ class LocalOnlineLLM(OpenAILLM):
 
 # Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
 @define(kw_only=True, auto_attribs=True)
-class LocalOfflineLLM(IRemoteLLM):
+class LocalLLM(IRemoteLLM):
     model_id: str
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
@@ -360,13 +507,18 @@ class LocalOfflineLLM(IRemoteLLM):
             from vllm import LLM
         except (ImportError, ModuleNotFoundError) as e:
             print(
-                Fore.RED
-                + "[ERROR] `LocalOfflineLLM` requires the library `vllm`. Install it."
+                Fore.RED + "[ERROR] `LocalLLM` requires the library `vllm`. Install it."
             )
             raise e
 
-    def text_chat(self, prompt):
+    def _text_chat(self, prompt):
         raise NotImplementedError
 
-    def image_text_chat(self, prompt, image, **kwargs):
+    def _image_text_chat(self, prompt, image, **kwargs):
         raise NotImplementedError
+
+    def ask(self, *, prompt, images, **kwargs):
+        return super().ask(prompt=prompt, images=images, **kwargs)
+
+    def ask_for_later(self, *, prompt, images, **kwargs):
+        return super().ask_for_later(prompt=prompt, images=images, **kwargs)
