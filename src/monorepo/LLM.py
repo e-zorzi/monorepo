@@ -98,9 +98,7 @@ def get_batch_result(request_info_path: Union[str, os.PathLike]):
             lines = file_content.decode("utf-8").split("\n")
             for line in lines:
                 if line != "":
-                    write_handle.write(
-                        json.dumps(eval(line.replace('":true', '":True')))
-                    )
+                    write_handle.write(json.dumps(json.loads(line)))
                     write_handle.write("\n")
     elif batch_job.state.name == "JOB_STATE_PENDING":
         print(Fore.YELLOW + "[INFO] Job still pending" + Fore.WHITE)
