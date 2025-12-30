@@ -6,6 +6,7 @@ from .LLM import (
     ClientBasedLLM,
     LocalLLM,
     encode_image_b64,
+    get_batch_result,
 )
 from .utils import (
     exec_subprocess,

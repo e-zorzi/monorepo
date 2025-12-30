@@ -1,5 +1,7 @@
 from google import genai
 import os
+import json
+from datetime import datetime
 from abc import ABC, abstractmethod
 import base64
 from io import BytesIO
@@ -9,6 +11,7 @@ from typing import Optional, Union, Iterable
 import numpy as np
 from PIL import Image
 from colorama import Fore, init as colorama_init
+from uuid import uuid4
 
 colorama_init(autoreset=True)
 
@@ -63,6 +66,42 @@ def encode_image_b64(image, format):
     return base64.b64encode(im_bytes).decode("utf-8")
 
 
+def get_batch_result(request_info_path: Union[str, os.PathLike]):
+    with open(request_info_path, "r") as read_handle:
+        batch_name = read_handle.readlines()[0]
+        batch_name.rstrip("\n ")
+
+    client = genai.Client()
+    batch_job = client.batches.get(name=batch_name)  # Initial get
+
+    # while batch_job.state.name not in completed_states:
+    #     print(f"Current state: {batch_job.state.name}")
+    #     time.sleep(30)  # Wait for 30 seconds before polling again
+    #     batch_job = client.batches.get(name=job_name)
+
+    # print(f"Job finished with state: {batch_job.state.name}")
+    if batch_job.state.name == "JOB_STATE_FAILED":
+        print(Fore.RED + f"[ERROR] {batch_job.error}" + Fore.WHITE)
+    elif batch_job.state.name == "JOB_STATE_SUCCEEDED":
+        result_file_name = batch_job.dest.file_name
+        results_file_path = f"{request_info_path.removesuffix('.info')}.results.jsonl"
+        print(
+            Fore.GREEN
+            + f"[SUCCESS] Downloading result file content to {results_file_path} ..."
+            + Fore.WHITE
+        )
+        file_content = client.files.download(file=result_file_name)
+        # Process file_content (bytes) as needed
+        with open(results_file_path, "a") as write_handle:
+            lines = file_content.decode("utf-8").split("\n")
+            for line in lines:
+                if line != "":
+                    write_handle.write(json.dumps(eval(line)))
+                    write_handle.write("\n")
+    elif batch_job.state.name == "JOB_STATE_PENDING":
+        print(Fore.YELLOW + "[INFO] Job still pending" + Fore.WHITE)
+
+
 class IRemoteLLM(ABC):
     @abstractmethod
     def ask(
@@ -72,16 +111,6 @@ class IRemoteLLM(ABC):
         images: Iterable[Union[np.ndarray, "Image"]],  # type: ignore
         **kwargs,
     ) -> str:
-        pass
-
-    @abstractmethod
-    def ask_for_later(
-        self,
-        *,
-        prompt: str,
-        images: Iterable[Union[np.ndarray, "Image"]],  # type: ignore
-        **kwargs,
-    ) -> dict:
         pass
 
 
@@ -240,40 +269,114 @@ class GeminiLLM(IRemoteLLM):
         Returns:
             dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a jsonl file)
         """
-        # TODO
-        # uploaded_image = self._client.files.upload(
-        #     file="/home/edoardo/monorepo/carpet.png"
-        # )
-        # print(uploaded_image.name)
+        id = uuid4().hex
+        version = 1
+        dir_path = os.path.join("/tmp", "batch_images")
+        if not os.path.exists(dir_path):
+            os.mkdir(dir_path)
 
-        # inline_requests = [
-        #     {
-        #         "contents": [
-        #             {
-        #                 "parts": [
-        #                     {
-        #                         "fileData": {
-        #                             "fileUri": "https://generativelanguage.googleapis.com/files/7uqi69igcxyw",
-        #                             "mimeType": "image/png",
-        #                         }
-        #                     },
-        #                     {"text": "Describe this image."},
-        #                 ],
-        #                 "role": "user",
-        #             }
-        #         ]
-        #     }
-        # ]
+        img_paths = []
+        if images is not None:
+            for image in images:
+                if isinstance(image, np.ndarray):
+                    image = Image.fromarray(image)
+                    image_format = "png"
+                else:
+                    image_format = image.format
 
-        # inline_batch_job = self._client.batches.create(
-        #     model="models/gemini-2.5-flash",
-        #     src=inline_requests,
-        #     config={
-        #         "display_name": "inlined-requests-job-1",
-        #     },
-        # )
+                img_path = os.path.join(
+                    dir_path, f"{uuid4().hex}.{image_format.lower()}"
+                )
+                image.save(img_path, format=image_format.lower())
+                img_paths.append(img_path)
 
-        # print(f"Created batch job: {inline_batch_job.name}")
+        generation_config = dict(temperature=self.temperature, top_p=self.top_p)
+        thinking_budget = thinking_budget
+        return dict(
+            version=version,
+            id=id,
+            prompt=prompt,
+            n_imgs=len(img_paths),
+            img_paths=img_paths,
+            generation_config=generation_config,
+            thinking_budget=thinking_budget,
+        )
+
+    def submit_batch(self, jsonl_file_path: Union[str, os.PathLike]) -> str:
+        now = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        uuid = uuid4().hex
+
+        cur_name = str(now) + "-" + uuid[:3] + uuid[-3:]
+
+        if not os.path.exists(".batches"):
+            os.mkdir(".batches")
+        new_file_path = os.path.join(".batches", cur_name)
+
+        jobs = []
+
+        with open(jsonl_file_path, "r") as read_handle:
+            for line in read_handle.readlines():
+                jobs.append(json.loads(line))
+
+        with open(f"{new_file_path}.jsonl", "a") as write_handle:
+            for job in jobs:
+                if job["version"] == 1:
+                    id = f"key-{job['id']}"
+                    generation_config = job["generation_config"]
+                    thinking_budget = job["thinking_budget"]
+                    contents = [{"parts": [], "role": "user"}]
+                    if job["n_imgs"] > 0:
+                        for img_path in job["img_paths"]:
+                            # Need to upload the image to Gemini and get the file path
+                            uploaded_file = self._client.files.upload(file=img_path)
+                            print(
+                                Fore.CYAN
+                                + "[INFO] Uploaded file to Gemini Files API: "
+                                + uploaded_file.name
+                            )
+
+                            # Safer to do it like this
+                            image_format = Image.open(img_path).format
+
+                            contents[0]["parts"].append({
+                                "fileData": {
+                                    "fileUri": f"https://generativelanguage.googleapis.com/{uploaded_file.name}",
+                                    "mimeType": f"image/{image_format.lower()}",
+                                }
+                            })
+                    request_dict = dict(
+                        contents=contents, generation_config=generation_config
+                    )
+                    # Append text prompt (always present)
+                    contents[0]["parts"].append({"text": job["prompt"]})
+                    new_json_line = dict(key=id, request=request_dict)
+
+                    json.dump(
+                        new_json_line,
+                        write_handle,
+                    )
+                    write_handle.write("\n")
+                else:
+                    raise NotImplementedError
+
+        batch_job = self._client.files.upload(
+            file=f"{new_file_path}.jsonl",
+            config=genai.types.UploadFileConfig(
+                display_name=f"my-batch-requests-{cur_name}", mime_type="jsonl"
+            ),
+        )
+        file_batch_job = self._client.batches.create(
+            model=self.model_id,
+            src=batch_job.name,
+            config={
+                "display_name": f"my-batch-requests-{cur_name}",
+            },
+        )
+
+        print(f"Created batch job: {file_batch_job.name}")
+        with open(f"{new_file_path}.info", "w") as info_write_handle:
+            info_write_handle.write(file_batch_job.name)
+        return f"{new_file_path}.info"
 
 
 @define(kw_only=True, auto_attribs=True)
@@ -420,9 +523,6 @@ class OpenAILLM(IRemoteLLM):
                 **kwargs,
             )
 
-    def ask_for_later(self, *, prompt, images, **kwargs):
-        raise NotImplementedError
-
 
 @define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
@@ -519,6 +619,3 @@ class LocalLLM(IRemoteLLM):
 
     def ask(self, *, prompt, images, **kwargs):
         return super().ask(prompt=prompt, images=images, **kwargs)
-
-    def ask_for_later(self, *, prompt, images, **kwargs):
-        return super().ask_for_later(prompt=prompt, images=images, **kwargs)
