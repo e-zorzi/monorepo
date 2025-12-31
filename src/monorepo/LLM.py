@@ -100,11 +100,13 @@ def get_batch_result(request_info_path: Union[str, os.PathLike]):
                 if line != "":
                     write_handle.write(json.dumps(json.loads(line)))
                     write_handle.write("\n")
+        return results_file_path
     elif batch_job.state.name == "JOB_STATE_PENDING":
         print(Fore.YELLOW + "[INFO] Job still pending" + Fore.WHITE)
         print(batch_job)
     else:
         print(batch_job)
+    return None
 
 
 class IRemoteLLM(ABC):
@@ -122,7 +124,7 @@ class IRemoteLLM(ABC):
 @define(kw_only=True, auto_attribs=True)
 class GeminiLLM(IRemoteLLM):
     model_id: str
-    api_key: str = None
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _delay: float = field(default=0.1)
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
@@ -171,7 +173,9 @@ class GeminiLLM(IRemoteLLM):
             )
         # Generate image config
         aspect_ratio = aspect_ratio if aspect_ratio is not None else self.aspect_ratio
+        self._aspect_ratio_check("aspect_ratio", aspect_ratio)
         image_size = image_size if image_size is not None else self.image_size
+        self._image_size_check("image_size", image_size)
 
         image_config = (
             genai.types.ImageConfig(aspect_ratio=aspect_ratio, image_size=image_size)
@@ -183,7 +187,8 @@ class GeminiLLM(IRemoteLLM):
         else:
             response_modalities = ["TEXT"]
 
-        return genai.types.GenerateContentConfig(
+        _TYPE = genai.types.GenerateContentConfig if not as_dict else dict
+        return _TYPE(
             temperature=self.temperature,
             top_p=self.top_p,
             thinking_config=thinking_config,
@@ -455,7 +460,7 @@ class GeminiLLM(IRemoteLLM):
 @define(kw_only=True, auto_attribs=True)
 class OpenAILLM(IRemoteLLM):
     model_id: str
-    api_key: str = None
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _url: str = field(default="https://api.openai.com/v1")
     _delay: float = field(default=0.1)
     temperature: float = field(default=1.0)
@@ -599,7 +604,7 @@ class OpenAILLM(IRemoteLLM):
 
 @define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
-    api_key: str = None
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _url: str = field(default="https://api.cerebras.ai/v1")
 
     def __attrs_post_init__(self):
@@ -626,7 +631,7 @@ class CerebrasLLM(OpenAILLM):
 
 @define(kw_only=True, auto_attribs=True)
 class GroqLLM(OpenAILLM):
-    api_key: str = None
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _url: str = field(default="https://api.groq.com/openai/v1")
 
     def __attrs_post_init__(self):
@@ -654,7 +659,7 @@ class GroqLLM(OpenAILLM):
 
 @define(kw_only=True, auto_attribs=True)
 class ClientBasedLLM(OpenAILLM):
-    api_key: str = "EMPTY"
+    api_key: str = field(default="EMPTY")
     _port: int = field(default=8000)
     _url: Optional[str] = None
 
