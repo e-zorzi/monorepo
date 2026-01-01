@@ -67,11 +67,14 @@ def encode_image_b64(image, format):
     return base64.b64encode(im_bytes).decode("utf-8")
 
 
-def get_batch_result(request_info_path: Union[str, os.PathLike]):
+def get_batch_result(
+    info_file_path: Union[str, os.PathLike],
+) -> tuple[bool, Optional[str]]:
     load_api_keys()
-    with open(request_info_path, "r") as read_handle:
+    with open(info_file_path, "r") as read_handle:
         batch_name = read_handle.readlines()[0]
         batch_name.rstrip("\n ")
+        assert batch_name.startswith("batches"), "Wrong file passed ?!"
 
     client = genai.Client()
     batch_job = client.batches.get(name=batch_name)  # Initial get
@@ -84,9 +87,18 @@ def get_batch_result(request_info_path: Union[str, os.PathLike]):
     # print(f"Job finished with state: {batch_job.state.name}")
     if batch_job.state.name == "JOB_STATE_FAILED":
         print(Fore.RED + f"[ERROR] {batch_job.error}" + Fore.WHITE)
+        return (False, None)
     elif batch_job.state.name == "JOB_STATE_SUCCEEDED":
         result_file_name = batch_job.dest.file_name
-        results_file_path = f"{request_info_path.removesuffix('.info')}.results.jsonl"
+        # Create new file name:
+        # 1) Find last '.' by reverting the string
+        last_dot_index = info_file_path[::-1].index(".")
+        # 2) Compute the correct index
+        last_dot_index = len(info_file_path) - last_dot_index - 1
+        # 3) This is the path without the extension after "."
+        path_no_extension = info_file_path[:last_dot_index]
+        # 4) This is the final path
+        results_file_path = f"{path_no_extension}.results.jsonl"
         print(
             Fore.GREEN
             + f"[SUCCESS] Downloading result file content to {results_file_path} ..."
@@ -100,13 +112,14 @@ def get_batch_result(request_info_path: Union[str, os.PathLike]):
                 if line != "":
                     write_handle.write(json.dumps(json.loads(line)))
                     write_handle.write("\n")
-        return results_file_path
+        return (True, results_file_path)
     elif batch_job.state.name == "JOB_STATE_PENDING":
         print(Fore.YELLOW + "[INFO] Job still pending" + Fore.WHITE)
         print(batch_job)
+        return (False, None)
     else:
         print(batch_job)
-    return None
+        return (False, None)
 
 
 class IRemoteLLM(ABC):
