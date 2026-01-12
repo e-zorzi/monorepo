@@ -184,30 +184,43 @@ class GeminiLLM(IRemoteLLM):
                 if not as_dict
                 else dict(include_thoughts=True, thinking_budget=thinking_budget)
             )
-        # Generate image config
-        aspect_ratio = aspect_ratio if aspect_ratio is not None else self.aspect_ratio
-        self._aspect_ratio_check("aspect_ratio", aspect_ratio)
-        image_size = image_size if image_size is not None else self.image_size
-        self._image_size_check("image_size", image_size)
-
-        image_config = (
-            genai.types.ImageConfig(aspect_ratio=aspect_ratio, image_size=image_size)
-            if not as_dict
-            else dict(aspect_ratio=aspect_ratio, image_size=image_size)
-        )
-        if generate_images:
-            response_modalities = ["TEXT", "IMAGE"]
-        else:
-            response_modalities = ["TEXT"]
 
         _TYPE = genai.types.GenerateContentConfig if not as_dict else dict
-        return _TYPE(
-            temperature=self.temperature,
-            top_p=self.top_p,
-            thinking_config=thinking_config,
-            image_config=image_config,
-            response_modalities=response_modalities,
-        )
+
+        if generate_images:
+            # Generate image config
+            aspect_ratio = (
+                aspect_ratio if aspect_ratio is not None else self.aspect_ratio
+            )
+            self._aspect_ratio_check("aspect_ratio", aspect_ratio)
+            image_size = image_size if image_size is not None else self.image_size
+            self._image_size_check("image_size", image_size)
+
+            image_config = (
+                genai.types.ImageConfig(
+                    aspect_ratio=aspect_ratio, image_size=image_size
+                )
+                if not as_dict
+                else dict(aspect_ratio=aspect_ratio, image_size=image_size)
+            )
+            if generate_images:
+                response_modalities = ["TEXT", "IMAGE"]
+            else:
+                response_modalities = ["TEXT"]
+
+            return _TYPE(
+                temperature=self.temperature,
+                top_p=self.top_p,
+                thinking_config=thinking_config,
+                image_config=image_config,
+                response_modalities=response_modalities,
+            )
+        else:
+            return _TYPE(
+                temperature=self.temperature,
+                top_p=self.top_p,
+                thinking_config=thinking_config,
+            )
 
     def _image_text_chat(
         self,
@@ -326,6 +339,7 @@ class GeminiLLM(IRemoteLLM):
         thinking_budget: int = None,
         aspect_ratio: str = None,
         image_size: str = None,
+        id: str = None,
         **kwargs,
     ):
         """Primary method for generating batch requests
@@ -337,7 +351,8 @@ class GeminiLLM(IRemoteLLM):
         Returns:
             dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a JSONL file)
         """
-        id = uuid4().hex
+        if id is None:
+            id = uuid4().hex
         version = 1
         dir_path = os.path.join("/tmp", "batch_images")
         if not os.path.exists(dir_path):
@@ -416,7 +431,7 @@ class GeminiLLM(IRemoteLLM):
                     # Why we support a custom format? Because we can, by doing so,
                     # handle image uploading + batch processing in two phases, avoiding to
                     # include images in base64 format (very large) inside the requests directly
-                    id = f"key-{job['id']}"
+                    id = job["id"]
                     generation_config = job["generation_config"]
                     contents = [{"parts": [], "role": "user"}]
                     if job["n_imgs"] > 0:
@@ -464,7 +479,7 @@ class GeminiLLM(IRemoteLLM):
             config={"display_name": f"my-batch-requests-{cur_name}"},
         )
 
-        print(f"Created batch job: {file_batch_job.name}")
+        print(f"[INFO] Created batch job: {file_batch_job.name}")
         with open(f"{new_file_path}.info", "w") as info_write_handle:
             info_write_handle.write(file_batch_job.name)
         return f"{new_file_path}.info"
