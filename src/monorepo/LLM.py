@@ -1,3 +1,8 @@
+"""
+Author: e-zorzi
+License: Apache 2.0
+"""
+
 from google import genai
 import os
 import json
@@ -128,7 +133,7 @@ class IRemoteLLM(ABC):
         self,
         *,
         prompt: str,
-        images: Iterable[Union[np.ndarray, "Image"]],  # type: ignore
+        images: Iterable[Union[np.ndarray, Image.Image]],
         **kwargs,
     ) -> str:
         pass
@@ -139,6 +144,7 @@ class GeminiLLM(IRemoteLLM):
     model_id: str
     api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _delay: float = field(default=0.1)
+    include_thoughts: bool = field(default=False)
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
     aspect_ratio: str = field(default="1:1")
@@ -167,22 +173,31 @@ class GeminiLLM(IRemoteLLM):
         thinking_budget=None,
         aspect_ratio=None,
         image_size=None,
+        include_thoughts=None,
         generate_images: bool = False,
         as_dict: bool = False,
     ):
+        if include_thoughts is None:
+            _include_thoughts = include_thoughts
+        else:
+            _include_thoughts = self.include_thoughts
         if thinking_budget is None:
             thinking_config = (
-                genai.types.ThinkingConfig(include_thoughts=True)
+                genai.types.ThinkingConfig(include_thoughts=_include_thoughts)
                 if not as_dict
-                else dict(include_thoughts=True)
+                else dict(include_thoughts=_include_thoughts)
             )
         else:
             thinking_config = (
                 genai.types.ThinkingConfig(
-                    include_thoughts=True, thinking_budget=thinking_budget
+                    include_thoughts=_include_thoughts,
+                    thinking_budget=thinking_budget,
                 )
                 if not as_dict
-                else dict(include_thoughts=True, thinking_budget=thinking_budget)
+                else dict(
+                    include_thoughts=_include_thoughts,
+                    thinking_budget=thinking_budget,
+                )
             )
 
         _TYPE = genai.types.GenerateContentConfig if not as_dict else dict
@@ -299,7 +314,7 @@ class GeminiLLM(IRemoteLLM):
         self,
         *,
         prompt: str,
-        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        images: Iterable[Union[np.ndarray, Image.Image]] = None,
         thinking_budget=None,
         return_metadata: bool = False,
         **kwargs,
@@ -334,7 +349,9 @@ class GeminiLLM(IRemoteLLM):
         self,
         *,
         prompt: str,
-        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        images: Union[
+            Iterable[Union[np.ndarray, Image.Image]], Iterable[Union[str, os.PathLike]]
+        ] = None,
         generate_images: bool = False,
         thinking_budget: int = None,
         aspect_ratio: str = None,
@@ -346,7 +363,8 @@ class GeminiLLM(IRemoteLLM):
 
         Args:
             prompt (str): text prompt
-            images (Iterable[Union[np.ndarray, &quot;Image&quot;]], optional): a set of images related to the prompt, if a multimodal chat is required
+            images (Union[Iterable[Union[np.ndarray, PIL.Image]],Iterable[Union[str, Pathlike]]], optional):
+                    a set of images related to the prompt (or paths to images), if a multimodal chat is required
 
         Returns:
             dict: a JSON-dumpable dictionary to be ingested by a later Gemini batch job (e.g. by saving it inside a JSONL file)
@@ -354,24 +372,31 @@ class GeminiLLM(IRemoteLLM):
         if id is None:
             id = uuid4().hex
         version = 1
-        dir_path = os.path.join("/tmp", "batch_images")
-        if not os.path.exists(dir_path):
-            os.mkdir(dir_path)
 
         img_paths = []
         if images is not None:
-            for image in images:
-                if isinstance(image, np.ndarray):
-                    image = Image.fromarray(image)
-                    image_format = "png"
-                else:
-                    image_format = image.format
+            assert images[0], "images must be an iterable"
+            # If images are passed as Images or np.arrays, then we save them locally for later upload
+            if isinstance(images[0], np.ndarray) or isinstance(images[0], Image.Image):
+                dir_path = os.path.join("/tmp", "batch_images")
+                if not os.path.exists(dir_path):
+                    os.mkdir(dir_path)
+                for image in images:
+                    if isinstance(image, np.ndarray):
+                        image = Image.fromarray(image)
+                        image_format = "png"
+                    else:
+                        image_format = image.format
 
-                img_path = os.path.join(
-                    dir_path, f"{uuid4().hex}.{image_format.lower()}"
-                )
-                image.save(img_path, format=image_format.lower())
-                img_paths.append(img_path)
+                    img_path = os.path.join(
+                        dir_path, f"{uuid4().hex}.{image_format.lower()}"
+                    )
+                    image.save(img_path, format=image_format.lower())
+                    img_paths.append(img_path)
+            elif isinstance(images[0], str) or isinstance(images[0], os.PathLike):
+                img_paths.extend([str(p) for p in images])
+            else:
+                raise TypeError("Wrong image type")
 
         generation_config = self._get_config(
             thinking_budget, aspect_ratio, image_size, generate_images, as_dict=True
@@ -604,7 +629,7 @@ class OpenAILLM(IRemoteLLM):
         self,
         *,
         prompt: str,
-        images: Iterable[Union[np.ndarray, "Image"]] = None,  # type: ignore
+        images: Iterable[Union[np.ndarray, Image.Image]] = None,  # type: ignore
         **kwargs,
     ) -> str:
         """_summary_
