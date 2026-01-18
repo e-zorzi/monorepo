@@ -29,27 +29,44 @@ class MultiHeadAttention(torch.nn.Module):
         super().__init__()
 
     def __attrs_post_init__(self):
-        # TODO add correct multihead logic
-        self.Q_proj = torch.nn.Linear(self.in_features, self._kq_embedding_size)
-        self.K_proj = torch.nn.Linear(self.in_features, self._kq_embedding_size)
-        self.V_proj = torch.nn.Linear(self.in_features, self.in_features)
+        assert (self.in_features / self.n_heads) % 1 == 0, (
+            f"The number of heads must divide exactly the number of features, but you have {self.in_features} features and {self.n_heads} heads"
+        )
+
+        for i in range(self.n_heads):
+            self.add_module(
+                f"Q_proj_{i}",
+                torch.nn.Linear(self.in_features, self._kq_embedding_size),
+            )
+            self.add_module(
+                f"K_proj_{i}",
+                torch.nn.Linear(self.in_features, self._kq_embedding_size),
+            )
+            self.add_module(
+                f"V_proj_{i}",
+                torch.nn.Linear(self.in_features, int(self.in_features / self.n_heads)),
+            )
 
     def __call__(self, x: torch.tensor, return_weights=False):
-        # TODO make it work with arbitrary batch size
-        # assert x.shape[0] == _n_features
-        Q = self.Q_proj(x)
-        K = self.K_proj(x)
-        V = self.V_proj(x)
-        logits = torch.matmul(Q, K.T) / sqrt(self.in_features)
+        # Naive implemenation of multihead attn with concatenations
+        # TODO improve (although I guess in prod a real net will have the number of heads and this code fixed)
+        results = torch.zeros_like(x)
+        attentions = []
+        for i in range(self.n_heads):
+            Q = self._modules[f"Q_proj_{i}"](x)
+            K = self._modules[f"K_proj_{i}"](x)
+            V = self._modules[f"V_proj_{i}"](x)
+            logits = torch.matmul(Q, K.T) / sqrt(self.in_features)
 
-        attention_weights = torch.softmax(logits, axis=-1)
+            attention_weights = torch.softmax(logits, axis=-1)
+            results[:, i * V.shape[1] : ((i + 1) * V.shape[1])] = torch.matmul(
+                attention_weights, V
+            )
+            attentions.append(attention_weights)
         if return_weights:
-            return (torch.matmul(attention_weights, V), attention_weights)
+            return results, attention_weights
         else:
-            return torch.matmul(attention_weights, V)
-
-    def parameters(self, recurse=True):
-        return super().parameters(recurse)
+            return results
 
 
 @define(auto_attribs=True, kw_only=True, eq=False)
@@ -84,9 +101,6 @@ class TransformerBlock(torch.nn.Module):
         z = self.norm1(x + y)
         projected = self.mlp(z)
         return self.norm2(projected + z)
-
-    def parameters(self, recurse=True):
-        return super().parameters(recurse)
 
 
 @define(auto_attribs=True, kw_only=True, eq=False)
