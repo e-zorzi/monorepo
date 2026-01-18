@@ -7,12 +7,6 @@ import torch
 from math import sqrt
 from attrs import define, field
 
-
-"""TODO
-- QKV in single linear layer
-- Correct multihead implementation
-"""
-
 _N_FEATURES = 16
 _HIDDEN_SIZE = 512
 _KQ_EMBEDDING_SIZE = 744
