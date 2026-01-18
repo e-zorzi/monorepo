@@ -113,14 +113,17 @@ class TransformerBlock(nn.Module):
 
         self.mlp = nn.Sequential(*layers)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.tensor):
+        return self.forward_pre_norm(x)
+
+    def forward_pre_norm(self, x: torch.Tensor):
         # Pre-norm
         y = self.multiheadattention(self.norm1(x))
         z = x + y
         projected = self.mlp(self.norm2(z))
         return projected + z
 
-    def forward_post_norm_old(self, x: torch.tensor):
+    def forward_post_norm(self, x: torch.tensor):
         # Post-norm
         y = self.multiheadattention(x)
         z = self.norm1(x + y)
