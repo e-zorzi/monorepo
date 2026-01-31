@@ -7,6 +7,7 @@ from .LLM import (
     LocalLLM,
     encode_image_b64,
     get_batch_result,
+    GROQ_MULTIMODAL_MODEL_ID,
 )
 from .utils import (
     exec_subprocess,

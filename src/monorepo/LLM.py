@@ -42,6 +42,9 @@ _VALID_GROQ_MULTIMODAL_MODELS = [
 ]
 _VALID_GROQ_DATE = "2025-12-16"
 
+# Export for ease of use
+GROQ_MULTIMODAL_MODEL_ID = "meta-llama/llama-4-maverick-17b-128e-instruct"
+
 
 def _warn_requires_vllm(classname, model_id):
     print(
