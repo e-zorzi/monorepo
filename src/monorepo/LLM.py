@@ -583,6 +583,7 @@ class OpenAILLM(IRemoteLLM):
             top_p=self.top_p,
             max_tokens=int(self.max_output_length / 4),
             stream=True,
+            **kwargs,
         )
         stringbuilder = ""
 
@@ -618,6 +619,7 @@ class OpenAILLM(IRemoteLLM):
             top_p=self.top_p,
             max_tokens=int(self.max_output_length / 4),
             stream=True,
+            **kwargs,
         )
         stringbuilder = ""
 
@@ -683,6 +685,24 @@ class CerebrasLLM(OpenAILLM):
         raise NotImplementedError(
             "Cerebras doesn't support multimodal serving at the moment. Try another class like `OpenAILLM' or `GeminiLLM'"
         )
+
+
+@define(kw_only=True, auto_attribs=True)
+class MistralLLM(OpenAILLM):
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
+    _url: str = field(default="https://api.mistral.ai/v1")
+
+    def __attrs_post_init__(self):
+        if self.api_key is None:
+            self.api_key = os.getenv("MISTRAL_API_KEY")
+
+        try:
+            self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
+        except openai.OpenAIError:
+            _warn_missing_key("MISTRAL_API_KEY")
+            raise openai.OpenAIError(
+                "The api_key client option must be set either by passing api_key to the client or by setting the MISTRAL_API_KEY environment variable"
+            )
 
 
 @define(kw_only=True, auto_attribs=True)
