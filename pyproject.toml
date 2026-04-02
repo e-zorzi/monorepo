@@ -1,6 +1,6 @@
 [project]
 name = "monorepo"
-version = "0.3.1"
+version = "0.3.2"
 description = "Deep Learning personal utilities"
 readme = "README.md"
 requires-python = ">=3.10"

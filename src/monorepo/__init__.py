@@ -2,6 +2,7 @@ from .LLM import (
     GeminiLLM,
     OpenAILLM,
     CerebrasLLM,
+    MistralLLM,
     GroqLLM,
     ClientBasedLLM,
     LocalLLM,

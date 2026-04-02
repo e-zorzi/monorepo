@@ -36,14 +36,12 @@ _SAFEGUARD_IMAGE_RESOLUTION = 1024
 # GROQ Multimodal models
 
 _VALID_GROQ_MULTIMODAL_MODELS = [
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
     "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-guard-4-12b",
 ]
-_VALID_GROQ_DATE = "2025-12-16"
+_VALID_GROQ_DATE = "2026-04-02"
 
 # Export for ease of use
-GROQ_MULTIMODAL_MODEL_ID = "meta-llama/llama-4-maverick-17b-128e-instruct"
+GROQ_MULTIMODAL_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 def _warn_requires_vllm(classname, model_id):
@@ -532,6 +530,20 @@ class OpenAILLM(IRemoteLLM):
             _warn_missing_key("OPENAI_API_KEY")
             raise e
 
+    def _build_answer(self, completion, **kwargs):
+        stringbuilder = ""
+        logprobs = []
+        for chunk in completion:
+            token = chunk.choices[0].delta.content
+            if "logprobs" in kwargs and chunk.choices[0].logprobs is not None:
+                logprobs.append(chunk.choices[0].logprobs.content[0].top_logprobs)
+            if token:
+                stringbuilder += f"{token}"
+        if "logprobs" in kwargs:
+            return stringbuilder, logprobs
+        else:
+            return stringbuilder
+
     def _image_text_chat(self, prompt, image, **kwargs):
         # Handle arrays
         if isinstance(image, np.ndarray):
@@ -585,14 +597,8 @@ class OpenAILLM(IRemoteLLM):
             stream=True,
             **kwargs,
         )
-        stringbuilder = ""
 
-        for chunk in completion:
-            token = chunk.choices[0].delta.content
-            if token:
-                stringbuilder += f"{token}"
-
-        return stringbuilder
+        return self._build_answer(completion, **kwargs)
 
     def _text_chat(
         self,
@@ -621,14 +627,8 @@ class OpenAILLM(IRemoteLLM):
             stream=True,
             **kwargs,
         )
-        stringbuilder = ""
 
-        for chunk in completion:
-            token = chunk.choices[0].delta.content
-            if token:
-                stringbuilder += f"{token}"
-
-        return stringbuilder
+        return self._build_answer(completion, **kwargs)
 
     def ask(
         self,
