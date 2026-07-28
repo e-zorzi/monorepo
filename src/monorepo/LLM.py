@@ -410,6 +410,7 @@ class GeminiLLM(IRemoteLLM):
             n_imgs=len(img_paths),
             img_paths=img_paths,
             generation_config=generation_config,
+            **kwargs,
         )
 
     def submit_batch(
@@ -483,7 +484,9 @@ class GeminiLLM(IRemoteLLM):
                     )
                     # Append text prompt (always present)
                     contents[0]["parts"].append({"text": job["prompt"]})
-                    new_json_line = dict(key=id, request=request_dict)
+                    new_json_line = dict(
+                        key=id, request=request_dict, kwargs=job["kwargs"]
+                    )
 
                     json.dump(
                         new_json_line,
