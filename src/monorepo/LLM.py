@@ -830,4 +830,4 @@ class LocalLLM(IRemoteLLM):
         raise NotImplementedError
 
     def ask(self, *, prompt, images, **kwargs):
-        return self.ask(prompt=prompt, **kwargs)
+        return self._text_chat(prompt=prompt, **kwargs)
