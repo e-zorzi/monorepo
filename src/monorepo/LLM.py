@@ -3,6 +3,7 @@ Author: e-zorzi
 License: Apache 2.0
 """
 
+import asyncio
 import base64
 import json
 import os
@@ -667,6 +668,9 @@ class OpenAILLM(IRemoteLLM):
                 **kwargs,
             )
 
+    async def ask_batch(self, prompts):
+        return await asyncio.gather(*(self.ask(prompt=prompt) for prompt in prompts))
+
 
 @define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
@@ -824,7 +828,11 @@ class LocalLLM(IRemoteLLM):
 
         # strip the prompt tokens, keep only the newly generated ones
         generated = output_ids[0][inputs["input_ids"].shape[-1] :]
-        return self.tokenizer.decode(generated, skip_special_tokens=True)
+        text = self.tokenizer.decode(generated, skip_special_tokens=True)
+        if "</think>" in text:
+            return text.split("</think>")[1].lstrip(" \n")
+        else:
+            return text
 
     def _image_text_chat(self, prompt, image, **kwargs):
         raise NotImplementedError
