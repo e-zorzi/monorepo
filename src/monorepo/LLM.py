@@ -8,6 +8,7 @@ import base64
 import json
 import os
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 from typing import Iterable, Optional, Union
@@ -668,8 +669,10 @@ class OpenAILLM(IRemoteLLM):
                 **kwargs,
             )
 
-    async def ask_batch(self, prompts):
-        return await asyncio.gather(*(self.ask(prompt=prompt) for prompt in prompts))
+    def ask_batch(self, prompts):
+        with ThreadPoolExecutor(max_workers=64) as pool:
+            futures = [pool.submit(self.ask, prompt=p) for p in prompts]
+            return [f.result() for f in futures]
 
 
 @define(kw_only=True, auto_attribs=True)
