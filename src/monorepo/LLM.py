@@ -790,13 +790,13 @@ class LocalLLM(IRemoteLLM):
     top_p: float = field(default=0.95)
     system_prompt: str = field(default="You are a helpful assistant.")
     max_new_tokens: int = field(default=512)
-    device: str = field(default="auto")
+    device: str = field(default="cuda:0")
 
     def __attrs_post_init__(self):
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self.client = AutoModelForCausalLM.from_pretrained(
             self.model_id,
-            torch_dtype=torch.bfloat16,  # use torch.float16 if your GPU doesn't support bf16
+            dtype=torch.bfloat16,  # use torch.float16 if your GPU doesn't support bf16
             device_map="auto",
         )
 
