@@ -3,20 +3,25 @@ Author: e-zorzi
 License: Apache 2.0
 """
 
-from google import genai
-import os
-import json
-from datetime import datetime
-from abc import ABC, abstractmethod
 import base64
+import json
+import os
+from abc import ABC, abstractmethod
+from datetime import datetime
 from io import BytesIO
-import openai
-from attrs import define, field
-from typing import Optional, Union, Iterable
-import numpy as np
-from PIL import Image
-from colorama import Fore, init as colorama_init
+from typing import Iterable, Optional, Union
 from uuid import uuid4
+
+import numpy as np
+import openai
+import torch
+from attrs import define, field
+from colorama import Fore
+from colorama import init as colorama_init
+from google import genai
+from PIL import Image
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer
+
 from monorepo.utils import load_api_keys
 
 colorama_init(autoreset=True)
@@ -751,28 +756,78 @@ class ClientBasedLLM(OpenAILLM):
         self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
 
-# Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
+# # Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
+# @define(kw_only=True, auto_attribs=True)
+# class LocalLLM(IRemoteLLM):
+#     model_id: str
+#     temperature: float = field(default=1.0)
+#     top_p: float = field(default=0.95)
+
+#     def __attrs_post_init__(self):
+#         # self._sampling_params =
+#         try:
+#             from vllm import LLM
+#         except (ImportError, ModuleNotFoundError) as e:
+#             print(
+#                 Fore.RED + "[ERROR] `LocalLLM` requires the library `vllm`. Install it."
+#             )
+#             raise e
+
+#     def _text_chat(self, prompt):
+#         raise NotImplementedError
+
+#     def _image_text_chat(self, prompt, image, **kwargs):
+#         raise NotImplementedError
+
+#     def ask(self, *, prompt, images, **kwargs):
+#         return super().ask(prompt=prompt, images=images, **kwargs)
+
+
 @define(kw_only=True, auto_attribs=True)
 class LocalLLM(IRemoteLLM):
     model_id: str
     temperature: float = field(default=1.0)
     top_p: float = field(default=0.95)
+    system_prompt: str = field(default="You are a helpful assistant.")
+    max_new_tokens: int = field(default=512)
+    device: str = field(default="auto")
 
     def __attrs_post_init__(self):
-        # self._sampling_params =
-        try:
-            from vllm import LLM
-        except (ImportError, ModuleNotFoundError) as e:
-            print(
-                Fore.RED + "[ERROR] `LocalLLM` requires the library `vllm`. Install it."
-            )
-            raise e
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        self.client = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            torch_dtype=torch.bfloat16,  # use torch.float16 if your GPU doesn't support bf16
+            device_map="auto",
+        )
 
     def _text_chat(self, prompt):
-        raise NotImplementedError
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        # Qwen chat template handles the special tokens for you
+        text = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+
+        with torch.no_grad():
+            output_ids = self.client.generate(
+                **inputs,
+                max_new_tokens=self.max_new_tokens,
+                do_sample=True,
+                temperature=self.temperature,
+                top_p=self.top_p,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+
+        # strip the prompt tokens, keep only the newly generated ones
+        generated = output_ids[0][inputs["input_ids"].shape[-1] :]
+        return self.tokenizer.decode(generated, skip_special_tokens=True)
 
     def _image_text_chat(self, prompt, image, **kwargs):
         raise NotImplementedError
 
     def ask(self, *, prompt, images, **kwargs):
-        return super().ask(prompt=prompt, images=images, **kwargs)
+        return self.ask(prompt=prompt, **kwargs)
