@@ -676,6 +676,95 @@ class OpenAILLM(IRemoteLLM):
 
 
 @define(kw_only=True, auto_attribs=True)
+class AsyncOpenAILLM(IRemoteLLM):
+    model_id: str
+    api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
+    _url: str = field(default="https://api.openai.com/v1")
+    _delay: float = field(default=0.1)
+    temperature: float = field(default=1.0)
+    top_p: float = field(default=0.95)
+    max_output_length: int = field(default=12000)
+
+    def __attrs_post_init__(self):
+        if self.api_key is None:
+            self.api_key = os.getenv("OPENAI_API_KEY")
+        try:
+            self._client = openai.AsyncOpenAI(api_key=self.api_key, base_url=self._url)
+        except openai.OpenAIError as e:
+            _warn_missing_key("OPENAI_API_KEY")
+            raise e
+
+    def _build_answer(self, completion, **kwargs):
+        stringbuilder = ""
+        logprobs = []
+        for chunk in completion:
+            token = chunk.choices[0].delta.content
+            if "logprobs" in kwargs and chunk.choices[0].logprobs is not None:
+                logprobs.append(chunk.choices[0].logprobs.content[0].top_logprobs)
+            if token:
+                stringbuilder += f"{token}"
+        if "logprobs" in kwargs:
+            return stringbuilder, logprobs
+        else:
+            return stringbuilder
+
+    def _image_text_chat(self, prompt, image, **kwargs):
+        raise NotImplementedError
+
+    async def _text_chat(self, prompt, **kwargs):
+        completion = await self._client.chat.completions.create(
+            model=self.model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt[:_SAFEGUARD_N_LETTERS],
+                        },
+                    ],
+                }
+            ],
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_tokens=int(self.max_output_length / 4),
+            stream=False,
+            **kwargs,
+        )
+
+        return completion.choices[0].message.content
+
+    async def _ask_batch_async(self, prompts):
+        return await asyncio.gather(*(self._text_chat(prompt=p) for p in prompts))
+
+    def ask_batch(self, prompts):
+        """Sync-facing entrypoint. Runs the async batch to completion."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop running in this thread — safe to use asyncio.run
+            return asyncio.run(self._ask_batch_async(prompts))
+        else:
+            # We're already inside a running loop (e.g. called from async code
+            # via a sync wrapper) — asyncio.run() would raise here.
+            # Options: run in a separate thread, or just expose an async
+            # method instead and require callers to await it.
+            raise RuntimeError(
+                "ask_batch() called synchronously from within a running event loop. "
+                "Use `await instance._ask_batch_async(prompts)` instead."
+            )
+
+    def ask(
+        self,
+        *,
+        prompt: str,
+        images: Iterable[Union[np.ndarray, Image.Image]] = None,  # type: ignore
+        **kwargs,
+    ) -> str:
+        raise NotADirectoryError
+
+
+@define(kw_only=True, auto_attribs=True)
 class CerebrasLLM(OpenAILLM):
     api_key: str = field(default=None, repr=lambda _: "<|CENSORED|>")
     _url: str = field(default="https://api.cerebras.ai/v1")
@@ -763,6 +852,21 @@ class ClientBasedLLM(OpenAILLM):
         self._client = openai.OpenAI(api_key=self.api_key, base_url=self._url)
 
 
+@define(kw_only=True, auto_attribs=True)
+class AsyncClientBasedLLM(AsyncOpenAILLM):
+    api_key: str = field(default="EMPTY")
+    _port: int = field(default=8000)
+    _url: Optional[str] = None
+
+    def __attrs_post_init__(self):
+        _warn_requires_vllm(self.__class__.__name__, self.model_id)
+
+        if self._url is None:
+            self._url = f"http://localhost:{self._port}/v1"
+
+        self._client = openai.AsyncOpenAI(api_key=self.api_key, base_url=self._url)
+
+
 # # Need to think about if it is worth implementing this, to avoid requiring a VLLM dependency
 # @define(kw_only=True, auto_attribs=True)
 # class LocalLLM(IRemoteLLM):
@@ -808,7 +912,6 @@ class LocalLLM(IRemoteLLM):
         )
 
     def _text_chat(self, prompt):
-
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt},
